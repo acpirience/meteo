@@ -5,8 +5,9 @@ from datetime import datetime
 from dateutil import tz
 
 
-def make_api_url(url):
-    return f"{url}{config['villes'][city]}&APPID={api_key}"
+def call_api(url, city, api_key):
+    request_url = f"{url}{config['villes'][city]}&APPID={api_key}"
+    return requests.get(request_url).json()
 
 
 def kelvin_to_celcius(temp):
@@ -49,26 +50,22 @@ with open("config.yml", "r") as yml_file:
 
 # get weather for each cites
 for city in config["villes"]:
-    curr_weather_url = make_api_url(config["api"]["current_weather"])
-    api_response = requests.get(curr_weather_url).json()
+    # current weather
+    api_response = call_api(config["api"]["current_weather"], city, api_key)
 
     desc = api_response["weather"][0]["description"]
-    temp, minTemp, maxTemp = (
+    temp, pressure, humidity, wind_speed, wind_deg = (
         api_response["main"]["temp"],
-        api_response["main"]["temp_min"],
-        api_response["main"]["temp_max"],
-    )
-    pressure, humidity = (
         api_response["main"]["pressure"],
         api_response["main"]["humidity"],
+        api_response["wind"]["speed"],
+        api_response["wind"]["deg"],
     )
-    wind_speed, wind_deg = api_response["wind"]["speed"], api_response["wind"]["deg"]
-
     sunrise, sunset = api_response["sys"]["sunrise"], api_response["sys"]["sunset"]
 
     logger.info(f"Current weather in {city}:")
     logger.info(
-        f"  Current Temperature: {kelvin_to_celcius(temp)}° ({kelvin_to_celcius(minTemp)}° min, {kelvin_to_celcius(maxTemp)}° max)"
+        f"  Current Temperature: {kelvin_to_celcius(temp)}°"
     )
     logger.info(
         f"  Wind: {wind_speed} m/s ({wind_deg}°), Pressure: {pressure} hPa, Humidity: {humidity}%"
