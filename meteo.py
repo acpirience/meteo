@@ -48,7 +48,7 @@ with open("openweathermap.api", "r") as key:
 with open("config.yml", "r") as yml_file:
     config = yaml.load(yml_file)
 
-# get weather for each cites
+# get weather for each cities
 for city in config["villes"]:
     # current weather
     api_response = call_api(config["api"]["current_weather"], city, api_key)
