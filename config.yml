@@ -1,0 +1,6 @@
+villes:
+  Les Sables d'Olonne: 6456578
+  Noisy Le Grand: 6451999
+
+api:
+  current_weather: api.openweathermap.org/data/2.5/weather?id=
