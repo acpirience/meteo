@@ -1,8 +1,10 @@
 import requests
 import yaml
+import json
 import logging
 from datetime import datetime
-from dateutil import tz
+from dateutil import tz, parser
+from dateutil.parser import parse
 
 
 def call_api(url, city, api_key):
@@ -49,18 +51,51 @@ with open("config.yml", "r") as yml_file:
     config = yaml.load(yml_file)
 
 # check cache presence, if absent create it
+# then load cache
+cache_filename = "meteo.cache"
 try:
-    with open("meteo.cache","r") as f:
-        pass
+    with open(cache_filename, "r") as file_cache:
+        cache_content = file_cache.read()
 except FileNotFoundError:
-    with open("meteo.cache", "w") as f:
-        pass
+    with open(cache_filename, "w") as file_cache:
+        cache_content = ""
+
+# transform cache to json object, handle cache case
+try:
+    cache = json.loads(cache_content)
+except:
+    cache = {}
 
 # get weather for each cities
 for city in config["villes"]:
+    use_cache = False
+
+    # check if we can use cache
+    if city not in cache:
+        cache[city] = {
+            "last_mod": "1900-01-01 00:00:00.0",
+            "current_weather": {},
+            "forecast_weather": {},
+        }
+
+    # validate last modification < 1 hour
+    cur_date = datetime.now()
+    last_mod = parse(cache[city]["last_mod"])
+    delta = cur_date - last_mod
+    delta_to_hour = (delta.days * 24) + (delta.seconds / 3600)
+    if delta_to_hour < 1:
+        use_cache = True
+
+    if use_cache:
+        logger.debug(f"Using cache for {city}")
+    else:
+        logger.debug(f"Calling API for {city}")
 
     # current weather
-    api_response = call_api(config["api"]["current_weather"], city, api_key)
+    if use_cache:
+        api_response = cache[city]["current_weather"]
+    else:
+        api_response = call_api(config["api"]["current_weather"], city, api_key)
 
     desc = api_response["weather"][0]["description"]
     temp, pressure, humidity, wind_speed, wind_deg = (
@@ -72,7 +107,12 @@ for city in config["villes"]:
     )
     sunrise, sunset = api_response["sys"]["sunrise"], api_response["sys"]["sunset"]
 
-    # logger.info(f"Current weather in {city}: {desc}")
+    # update cache in memory
+    if not use_cache:
+        cache[city]["last_mod"] = str(cur_date)
+        cache[city]["current_weather"] = api_response
+
+    logger.info(f"Current weather in {city}: {desc}")
     logger.info(f"  Current Temperature: {kelvin_to_celcius(temp)}C")
     logger.info(
         f"  Wind: {wind_speed} m/s ({wind_deg} deg), Pressure: {pressure} hPa, Humidity: {humidity}%"
@@ -83,11 +123,15 @@ for city in config["villes"]:
     logger.info("-" * 80)
 
     # forecast weather in 5 days
-    api_response = call_api(config["api"]["forecast_weather"], city, api_key)
+    if use_cache:
+        api_response = cache[city]["forecast_weather"]
+    else:
+        api_response = call_api(config["api"]["forecast_weather"], city, api_key)
+
     forecast = {}
 
     for measure in api_response["list"]:
-        forecast_key = unix_to_local_time(measure["dt"]).strftime("%Y-%m-%d %H:%M:%S")
+        forecast_key = measure["dt"]
         tmp_val = {}
         tmp_val["desc"] = measure["weather"][0]["description"]
         tmp_val["temp"], tmp_val["pressure"], tmp_val["humidity"], tmp_val[
@@ -101,11 +145,17 @@ for city in config["villes"]:
         )
         forecast[forecast_key] = tmp_val
 
+    # update cache in memory
+    if not use_cache:
+        cur_date = str(datetime.now())
+        cache[city]["last_mod"] = cur_date
+        cache[city]["forecast_weather"] = api_response
+
     logger.info(f"Forecast for next 5 days:")
     for key in forecast:
         log = " ".join(
             (
-                f"{key} : ",
+                f"{unix_to_local_time(key).strftime('%Y-%m-%d %H:%M:%S')} : ",
                 f"Temp.: {kelvin_to_celcius(forecast[key]['temp']):>4}C",
                 f"Wind: {forecast[key]['wind_speed']:>4} m/s",
                 f"({round(forecast[key]['wind_deg']):>3} deg),",
@@ -117,3 +167,8 @@ for city in config["villes"]:
 
         logger.info(log)
     logger.info("-" * 120)
+
+    # update cache on disk
+    if not use_cache:
+        with open(cache_filename, "w") as file_cache:
+            json.dump(cache, file_cache)
