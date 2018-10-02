@@ -48,8 +48,17 @@ with open("openweathermap.api", "r") as key:
 with open("config.yml", "r") as yml_file:
     config = yaml.load(yml_file)
 
+# check cache presence, if absent create it
+try:
+    with open("meteo.cache","r") as f:
+        pass
+except FileNotFoundError:
+    with open("meteo.cache", "w") as f:
+        pass
+
 # get weather for each cities
 for city in config["villes"]:
+
     # current weather
     api_response = call_api(config["api"]["current_weather"], city, api_key)
 
@@ -75,11 +84,11 @@ for city in config["villes"]:
 
     # forecast weather in 5 days
     api_response = call_api(config["api"]["forecast_weather"], city, api_key)
-    forecast = dict()
+    forecast = {}
 
     for measure in api_response["list"]:
         forecast_key = unix_to_local_time(measure["dt"]).strftime("%Y-%m-%d %H:%M:%S")
-        tmp_val = dict()
+        tmp_val = {}
         tmp_val["desc"] = measure["weather"][0]["description"]
         tmp_val["temp"], tmp_val["pressure"], tmp_val["humidity"], tmp_val[
             "wind_speed"
