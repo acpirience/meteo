@@ -2,8 +2,9 @@ import requests
 import json
 import logging
 from datetime import datetime
-from dateutil import tz, parser
 from dateutil.parser import parse
+import pytz
+from tzlocal import get_localzone
 
 
 def call_api(url, city, api_key):
@@ -15,14 +16,15 @@ def kelvin_to_celcius(temp):
     return round(temp - 273.15, 1)
 
 
-def unix_to_local_time(unix):
+def utc_time_to_local_time(utc_time, local_zone=None):
+    d = datetime.utcfromtimestamp(utc_time)
     # Timezone conversion
-    from_zone = tz.gettz("UTC")
-    to_zone = tz.gettz("CEST")
+    d = pytz.UTC.localize(d)
+    if not local_zone: # if no local zone was provided, get it locally
+        local_zone = get_localzone()
 
-    utc = datetime.utcfromtimestamp(unix)
-    utc = utc.replace(tzinfo=from_zone)
-    return utc.astimezone(to_zone)
+    pst = pytz.timezone(str(local_zone))
+    return d.astimezone(pst)
 
 
 def run(api_key, city_list):
@@ -108,7 +110,7 @@ def run(api_key, city_list):
             f"  Wind: {wind_speed} m/s ({wind_deg} deg), Pressure: {pressure} hPa, Humidity: {humidity}%"
         )
         logger.info(
-            f"  Sunrise: {unix_to_local_time(sunrise).strftime('%H:%M:%S')} - Sunset: {unix_to_local_time(sunset).strftime('%H:%M:%S')}"
+            f"  Sunrise: {utc_time_to_local_time(sunrise).strftime('%H:%M:%S')} - Sunset: {utc_time_to_local_time(sunset).strftime('%H:%M:%S')}"
         )
         logger.info("-" * 80)
 
@@ -145,7 +147,7 @@ def run(api_key, city_list):
         for key in forecast:
             log = " ".join(
                 (
-                    f"{unix_to_local_time(key).strftime('%Y-%m-%d %H:%M:%S')} : ",
+                    f"{utc_time_to_local_time(key).strftime('%Y-%m-%d %H:%M:%S')} : ",
                     f"Temp.: {kelvin_to_celcius(forecast[key]['temp']):>4}C",
                     f"Wind: {forecast[key]['wind_speed']:>4} m/s",
                     f"({round(forecast[key]['wind_deg']):>3} deg),",
