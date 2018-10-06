@@ -13,11 +13,13 @@ def main():
     with open("openweathermap.api", "r") as key:
         api_key = key.read()
 
-    # run meteo for "Les Sables d'Olonnes" (Id: 6456578) and "Noisy Le Grand" (Id: 6451999)
+    # run meteo for "Les Sables d'Olonnes" (Id: 6456578)
     les_sables = CityMeteo(api_key, 6456578)
-    noisy = CityMeteo(api_key, 6451999)
-    les_sables.run()
-    noisy.run()
+    logging.info("Current weather for les_sables: %s", les_sables.current_weather)
+    logging.info("Forecast weather for les_sables: %s", les_sables.forecast_weather)
+
+    for measure_date in les_sables.forecast_weather:
+        logging.info("%s => %s", measure_date, les_sables.forecast_weather[measure_date]["temp"])
 
 
 if __name__ == "__main__":
