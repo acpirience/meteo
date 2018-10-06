@@ -15,19 +15,24 @@ API_URLS = {
     "FORECAST": "https://api.openweathermap.org/data/2.5/forecast?id=",
 }
 
-CACHE_FILENAME = "meteopy.cache"
+CACHE_FILENAME = "meteopy"
+CACHE_EXTENSION = ".cache"
 
 
-class meteo:
+class CityMeteo:
     """ main class for module meteopy """
 
-    def __init__(self, api_key, city_list):
+    def __init__(self, api_key, city):
         self.key = api_key
-        self.cities = city_list
+        self.city = str(city)
+        self.cache_name = f"{CACHE_FILENAME}{self.city}.{CACHE_EXTENSION}"
+        self.cache = self.load_cache()
 
-    def call_weather_api(self, weather_type, city):
+    def call_weather_api(self, weather_type):
         """Calls the openweathermap API and returns a json dict"""
-        return requests.get(f"{API_URLS[weather_type]}{city}&APPID={self.key}").json()
+        return requests.get(
+            f"{API_URLS[weather_type]}{self.city}&APPID={self.key}"
+        ).json()
 
     @staticmethod
     def kelvin_to_celcius(temp):
@@ -47,112 +52,101 @@ class meteo:
         pst = pytz.timezone(str(local_zone))
         return utc_date.astimezone(pst)
 
-    def run(self):
-        # check cache presence, if absent create it
-        # then load cache
+    def load_cache(self):
+        """"check cache presence, if absent create it then load cache"""
         try:
-            with open(CACHE_FILENAME, "r") as file_cache:
+            with open(self.cache_name, "r") as file_cache:
                 cache_content = file_cache.read()
         except FileNotFoundError:
-            with open(CACHE_FILENAME, "w") as file_cache:
+            with open(self.cache_name, "w") as file_cache:
                 cache_content = ""
 
         # transform cache to json object, handle cache case
         try:
             cache = json.loads(cache_content)
         except ValueError:
-            cache = {}
+            cache = {
+                "last_mod": "1900-01-01 00:00:00.0",
+                "current_weather": {},
+                "forecast_weather": {},
+            }
 
-        # get weather for each cities
-        for city in self.cities:
-            use_cache = False
-            city = str(city)  # Dict keys are only string ...
+        return cache
 
-            # check if we can use cache
-            if city not in cache:
-                cache[city] = {
-                    "last_mod": "1900-01-01 00:00:00.0",
-                    "current_weather": {},
-                    "forecast_weather": {},
-                }
+    def run(self):
+        # validate last modification < 1 hour
+        cur_date = datetime.now()
+        last_mod = parse(self.cache["last_mod"])
+        delta = cur_date - last_mod
+        delta_to_hour = (delta.days * 24) + (delta.seconds / 3600)
+        use_cache = delta_to_hour < 1
 
-            # validate last modification < 1 hour
-            cur_date = datetime.now()
-            last_mod = parse(cache[city]["last_mod"])
-            delta = cur_date - last_mod
-            delta_to_hour = (delta.days * 24) + (delta.seconds / 3600)
-            if delta_to_hour < 1:
-                use_cache = True
+        # current weather
+        if use_cache:
+            logging.debug(f"Using cache for city Id:{self.city}")
+            api_response = self.cache["current_weather"]
+        else:
+            logging.debug(f"Calling API for city Id:{self.city}")
+            api_response = self.call_weather_api("CURRENT")
 
-            if use_cache:
-                logging.debug(f"Using cache for city Id:{city}")
-            else:
-                logging.debug(f"Calling API for city Id:{city}")
+        city_name = api_response["name"]
+        desc = api_response["weather"][0]["description"]
+        temp, pressure, humidity, wind_speed, wind_deg = (
+            api_response["main"]["temp"],
+            api_response["main"]["pressure"],
+            api_response["main"]["humidity"],
+            api_response["wind"]["speed"],
+            api_response["wind"]["deg"],
+        )
+        sunrise, sunset = (
+            api_response["sys"]["sunrise"],
+            api_response["sys"]["sunset"],
+        )
 
-            # current weather
-            if use_cache:
-                api_response = cache[city]["current_weather"]
-            else:
-                api_response = self.call_weather_api("CURRENT", city)
+        # update cache in memory
+        if not use_cache:
+            self.cache["last_mod"] = str(cur_date)
+            self.cache["current_weather"] = api_response
 
-            city_name = api_response["name"]
-            desc = api_response["weather"][0]["description"]
-            temp, pressure, humidity, wind_speed, wind_deg = (
-                api_response["main"]["temp"],
-                api_response["main"]["pressure"],
-                api_response["main"]["humidity"],
-                api_response["wind"]["speed"],
-                api_response["wind"]["deg"],
+        logging.info(f"Current weather in {city_name}: {desc}")
+        logging.info(f"  Current Temperature: {self.kelvin_to_celcius(temp)}C")
+
+        # forecast weather in 5 days
+        if use_cache:
+            api_response = self.cache["forecast_weather"]
+        else:
+            api_response = self.call_weather_api("FORECAST")
+
+        forecast = {}
+
+        for measure in api_response["list"]:
+            forecast_key = measure["dt"]
+            tmp_val = {}
+            tmp_val["desc"] = measure["weather"][0]["description"]
+            tmp_val["temp"], tmp_val["pressure"], tmp_val["humidity"], tmp_val[
+                "wind_speed"
+            ], tmp_val["wind_deg"] = (
+                measure["main"]["temp"],
+                measure["main"]["pressure"],
+                measure["main"]["humidity"],
+                measure["wind"]["speed"],
+                measure["wind"]["deg"],
             )
-            sunrise, sunset = (
-                api_response["sys"]["sunrise"],
-                api_response["sys"]["sunset"],
-            )
+            forecast[forecast_key] = tmp_val
 
-            # update cache in memory
-            if not use_cache:
-                cache[city]["last_mod"] = str(cur_date)
-                cache[city]["current_weather"] = api_response
+        # update cache in memory
+        if not use_cache:
+            cur_date = str(datetime.now())
+            self.cache["last_mod"] = cur_date
+            self.cache["forecast_weather"] = api_response
 
-            logging.info(f"Current weather in {city_name}: {desc}")
-            logging.info(f"  Current Temperature: {self.kelvin_to_celcius(temp)}C")
+        logging.info(f"Forecast for next 5 days: {len(forecast)} lines")
+        logging.info("")
 
-            # forecast weather in 5 days
-            if use_cache:
-                api_response = cache[city]["forecast_weather"]
-            else:
-                api_response = self.call_weather_api("FORECAST", city)
-
-            forecast = {}
-
-            for measure in api_response["list"]:
-                forecast_key = measure["dt"]
-                tmp_val = {}
-                tmp_val["desc"] = measure["weather"][0]["description"]
-                tmp_val["temp"], tmp_val["pressure"], tmp_val["humidity"], tmp_val[
-                    "wind_speed"
-                ], tmp_val["wind_deg"] = (
-                    measure["main"]["temp"],
-                    measure["main"]["pressure"],
-                    measure["main"]["humidity"],
-                    measure["wind"]["speed"],
-                    measure["wind"]["deg"],
-                )
-                forecast[forecast_key] = tmp_val
-
-            # update cache in memory
-            if not use_cache:
-                cur_date = str(datetime.now())
-                cache[city]["last_mod"] = cur_date
-                cache[city]["forecast_weather"] = api_response
-
-            logging.info(f"Forecast for next 5 days: {len(forecast)} lines")
-            logging.info("")
-
-            # update cache on disk
-            if not use_cache:
-                with open(CACHE_FILENAME, "w") as file_cache:
-                    json.dump(cache, file_cache)
+        # update cache on disk
+        if not use_cache:
+            with open(self.cache_name, "w") as file_cache:
+                json.dump(self.cache, file_cache)
 
 
 def main():

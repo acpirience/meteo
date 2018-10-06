@@ -1,5 +1,5 @@
 import logging
-from meteopy.meteo import meteo
+from meteopy.meteo import CityMeteo
 
 
 def main():
@@ -14,8 +14,10 @@ def main():
         api_key = key.read()
 
     # run meteo for "Les Sables d'Olonnes" (Id: 6456578) and "Noisy Le Grand" (Id: 6451999)
-    my_meteo = meteo(api_key, [6456578, 6451999])
-    my_meteo.run()
+    les_sables = CityMeteo(api_key, 6456578)
+    noisy = CityMeteo(api_key, 6451999)
+    les_sables.run()
+    noisy.run()
 
 
 if __name__ == "__main__":
