@@ -1,3 +1,7 @@
+"""
+    give the current weather and forecast for 5 days for a list of cities from openweathermap.org
+"""
+
 import json
 import logging
 from datetime import datetime
@@ -6,19 +10,33 @@ from dateutil.parser import parse
 import pytz
 from tzlocal import get_localzone
 
+API_URLS = {
+    "CURRENT": "https://api.openweathermap.org/data/2.5/weather?id=",
+    "FORECAST": "https://api.openweathermap.org/data/2.5/forecast?id=",
+}
+
+CACHE_FILENAME = "meteopy.cache"
+
 
 class meteo:
-    def __init__(self):
-        pass
+    """ main class for module meteopy """
 
-    def call_api(self, url, city, api_key):
-        request_url = f"{url}{city}&APPID={api_key}"
-        return requests.get(request_url).json()
+    def __init__(self, api_key, city_list):
+        self.key = api_key
+        self.cities = city_list
 
-    def kelvin_to_celcius(self, temp):
+    def call_weather_api(self, weather_type, city):
+        """Calls the openweathermap API and returns a json dict"""
+        return requests.get(f"{API_URLS[weather_type]}{city}&APPID={self.key}").json()
+
+    @staticmethod
+    def kelvin_to_celcius(temp):
+        """Transform Kelvin temperature to Celcius"""
         return round(temp - 273.15, 1)
 
-    def utc_time_to_local_time(self, utc_time, local_zone=None):
+    @staticmethod
+    def utc_time_to_local_time(utc_time, local_zone=None):
+        """Transform UTC datemine to local timezone (or the one provided if any)"""
         utc_date = datetime.utcfromtimestamp(utc_time)
         # Timezone conversion
         utc_date = pytz.UTC.localize(utc_date)
@@ -29,27 +47,14 @@ class meteo:
         pst = pytz.timezone(str(local_zone))
         return utc_date.astimezone(pst)
 
-    def run(self, api_key, city_list):
-        # logging
-        logger = logging.getLogger(__name__)
-        logger.setLevel(logging.DEBUG)
-        formatter = logging.Formatter("%(asctime)s %(name)-12s %(levelname)-8s %(message)s")
-        console = logging.StreamHandler()
-        console.setLevel(logging.DEBUG)
-        console.setFormatter(formatter)
-        logger.addHandler(console)
-
-        current_weather_api_url = "https://api.openweathermap.org/data/2.5/weather?id="
-        forecast_weather_api_url = "https://api.openweathermap.org/data/2.5/forecast?id="
-        cache_filename = "meteopy.cache"
-
+    def run(self):
         # check cache presence, if absent create it
         # then load cache
         try:
-            with open(cache_filename, "r") as file_cache:
+            with open(CACHE_FILENAME, "r") as file_cache:
                 cache_content = file_cache.read()
         except FileNotFoundError:
-            with open(cache_filename, "w") as file_cache:
+            with open(CACHE_FILENAME, "w") as file_cache:
                 cache_content = ""
 
         # transform cache to json object, handle cache case
@@ -59,7 +64,7 @@ class meteo:
             cache = {}
 
         # get weather for each cities
-        for city in city_list:
+        for city in self.cities:
             use_cache = False
             city = str(city)  # Dict keys are only string ...
 
@@ -80,15 +85,15 @@ class meteo:
                 use_cache = True
 
             if use_cache:
-                logger.debug(f"Using cache for city Id:{city}")
+                logging.debug(f"Using cache for city Id:{city}")
             else:
-                logger.debug(f"Calling API for city Id:{city}")
+                logging.debug(f"Calling API for city Id:{city}")
 
             # current weather
             if use_cache:
                 api_response = cache[city]["current_weather"]
             else:
-                api_response = self.call_api(current_weather_api_url, city, api_key)
+                api_response = self.call_weather_api("CURRENT", city)
 
             city_name = api_response["name"]
             desc = api_response["weather"][0]["description"]
@@ -99,28 +104,24 @@ class meteo:
                 api_response["wind"]["speed"],
                 api_response["wind"]["deg"],
             )
-            sunrise, sunset = api_response["sys"]["sunrise"], api_response["sys"]["sunset"]
+            sunrise, sunset = (
+                api_response["sys"]["sunrise"],
+                api_response["sys"]["sunset"],
+            )
 
             # update cache in memory
             if not use_cache:
                 cache[city]["last_mod"] = str(cur_date)
                 cache[city]["current_weather"] = api_response
 
-            logger.info(f"Current weather in {city_name}: {desc}")
-            logger.info(f"  Current Temperature: {self.kelvin_to_celcius(temp)}C")
-            logger.info(
-                f"  Wind: {wind_speed} m/s ({wind_deg} deg), Pressure: {pressure} hPa, Humidity: {humidity}%"
-            )
-            logger.info(
-                f"  Sunrise: {self.utc_time_to_local_time(sunrise).strftime('%H:%M:%S')} - Sunset: {self.utc_time_to_local_time(sunset).strftime('%H:%M:%S')}"
-            )
-            logger.info("-" * 80)
+            logging.info(f"Current weather in {city_name}: {desc}")
+            logging.info(f"  Current Temperature: {self.kelvin_to_celcius(temp)}C")
 
             # forecast weather in 5 days
             if use_cache:
                 api_response = cache[city]["forecast_weather"]
             else:
-                api_response = self.call_api(forecast_weather_api_url, city, api_key)
+                api_response = self.call_weather_api("FORECAST", city)
 
             forecast = {}
 
@@ -145,26 +146,12 @@ class meteo:
                 cache[city]["last_mod"] = cur_date
                 cache[city]["forecast_weather"] = api_response
 
-            logger.info(f"Forecast for next 5 days:")
-            for key in forecast:
-                log = " ".join(
-                    (
-                        f"{self.utc_time_to_local_time(key).strftime('%Y-%m-%d %H:%M:%S')} : ",
-                        f"Temp.: {self.kelvin_to_celcius(forecast[key]['temp']):>4}C",
-                        f"Wind: {forecast[key]['wind_speed']:>4} m/s",
-                        f"({round(forecast[key]['wind_deg']):>3} deg),",
-                        f"Pressure: {forecast[key]['pressure']:>7} hPa,",
-                        f"Humidity: {forecast[key]['humidity']:>3}%",
-                        f"  => {forecast[key]['desc']}",
-                    )
-                )
-
-                logger.info(log)
-            logger.info("-" * 120)
+            logging.info(f"Forecast for next 5 days: {len(forecast)} lines")
+            logging.info("")
 
             # update cache on disk
             if not use_cache:
-                with open(cache_filename, "w") as file_cache:
+                with open(CACHE_FILENAME, "w") as file_cache:
                     json.dump(cache, file_cache)
 
 
